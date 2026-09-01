@@ -1,0 +1,58 @@
+{
+  "name": "job_retrieval_v2",
+  "version": "2.0.0-silver",
+  "annotation_status": "silver_expert_review_required",
+  "selection_policy": "development_only_then_single_selected_model_on_frozen_test",
+  "counts": {
+    "jobs": 120,
+    "evidence_units": 1250,
+    "queries": 480,
+    "qrels": 720,
+    "multi_relevant_queries": 240,
+    "candidate_pool_size": 50,
+    "annotation_tasks": 480
+  },
+  "occupation_family_distribution": {
+    "business_policy_management": 7,
+    "data_engineering": 14,
+    "data_science_analytics": 39,
+    "finance_risk_quant": 14,
+    "life_sciences_research": 7,
+    "ml_ai_research": 17,
+    "operations_infrastructure": 7,
+    "software_security_engineering": 15
+  },
+  "split_distribution": {
+    "development": 84,
+    "test": 36
+  },
+  "local_artifacts": {
+    "annotation_tasks.jsonl": {
+      "rows": 480,
+      "versioned": false,
+      "regenerate_with": "python -m tools.build_retrieval_v2_dataset"
+    }
+  },
+  "files": {
+    "candidate_pools.jsonl": {
+      "bytes": 2356200,
+      "sha256": "39ebfff3e0a20a0b808310f0479516547c54035f618a102995000eda60f715f9"
+    },
+    "evidence_units.jsonl": {
+      "bytes": 1000565,
+      "sha256": "b8e8eb95d1968505d8bcd3498a3f9ba69cd5faba04a57bb02f78914416cafba4"
+    },
+    "job_snapshots.jsonl": {
+      "bytes": 613151,
+      "sha256": "c2a98f5523e063083624e66bc03323bcbb1a1cbedb3639b01fa17a6968513d67"
+    },
+    "qrels.jsonl": {
+      "bytes": 196560,
+      "sha256": "5e3094362c3638d8f9284c3b74feb0e58e5f16c0742afe05bcb6fa4225f81c3e"
+    },
+    "queries.jsonl": {
+      "bytes": 191923,
+      "sha256": "8fd4e95f27488aad86f10ccc1971e1a9c38653d85b8fd09af4db31949327d2e9"
+    }
+  }
+}

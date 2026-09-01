@@ -1,0 +1,4 @@
+interface:
+  display_name: "求职投递工作流"
+  short_description: "面向岗位匹配、定制材料和面试准备的证据驱动求职助手"
+  default_prompt: "Use $job-application-workflow to analyze a job and prepare a factual application package."

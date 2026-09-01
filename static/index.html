@@ -1,0 +1,322 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Job + Multimodal Assistant</title>
+  <style>
+    :root {
+      --bg: #f7f8fc;
+      --card: #ffffff;
+      --line: #d9deeb;
+      --text: #1e2433;
+      --sub: #55607a;
+      --accent: #0077b6;
+      --accent2: #00a896;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(160deg, #eef7ff 0%, var(--bg) 40%, #eefaf7 100%);
+      color: var(--text);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.5;
+    }
+    .container {
+      width: min(1200px, 95vw);
+      margin: 24px auto 40px;
+      display: grid;
+      gap: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 8px 20px rgba(20, 35, 70, 0.06);
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 0 0 10px; font-size: 18px; }
+    p { margin: 4px 0 10px; color: var(--sub); }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+      gap: 12px;
+    }
+    label { display: block; margin-top: 8px; font-size: 13px; color: #374151; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 4px;
+      background: #fff;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      color: #fff;
+      background: var(--accent);
+      font-weight: 600;
+    }
+    button.secondary { background: var(--accent2); }
+    pre {
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 220px;
+    }
+    .workflow-status {
+      margin: 0 0 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f0f7ff;
+      color: var(--text);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>多模态智能助手演示</h1>
+      <p>技术栈: FastAPI + LangChain + Chroma + GLM(智谱AI OpenAI Compatible) + RAG + Agent</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>求职助手（Skill 工作流）</h2>
+        <p>“一键生成申请包”会以 <code>application_package</code> 意图进入 Agent，自动激活求职工作流 Skill；联系方式为空时会标为“待确认”。</p>
+        <label>candidate_id（可选，已上传候选人资料时填写）</label>
+        <input id="candidateId" placeholder="例如 current_candidate" />
+        <label>候选人姓名</label>
+        <input id="candidateName" placeholder="可选；为空则待确认" />
+        <label>候选人邮箱</label>
+        <input id="candidateEmail" type="email" placeholder="可选；为空则待确认" />
+        <label>候选人电话</label>
+        <input id="candidatePhone" placeholder="可选；为空则待确认" />
+        <label>公司名称</label>
+        <input id="companyName" value="某某科技有限公司" />
+        <label>岗位名称</label>
+        <input id="jobTitle" value="大模型应用开发工程师" />
+        <label>岗位JD</label>
+        <textarea id="jdText">负责构建多模态RAG应用，使用LangChain和向量数据库完成企业知识问答，能够对接GLM模型并落地上线。</textarea>
+        <label>候选人补充信息</label>
+        <textarea id="resumeText">熟悉Python/FastAPI，具备LangChain与RAG实践经验，做过企业知识库问答与Agent工具调用系统。</textarea>
+        <label>自然语言 Agent 指令</label>
+        <textarea id="agentGoal" placeholder="例如：请分析我与某某科技大模型应用开发工程师岗位的匹配度">请分析我和某某科技有限公司大模型应用开发工程师岗位的匹配度，并指出能力缺口。</textarea>
+
+        <div class="btns">
+          <button onclick="analyze()">岗位匹配分析</button>
+          <button class="secondary" onclick="oneClickApply()">一键生成申请包</button>
+          <button onclick="runAgent()">执行自然语言指令</button>
+          <button class="secondary" onclick="newAgentConversation()">新建 Agent 会话</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>知识助手</h2>
+        <label>文本知识入库（pdf/docx/md/txt/csv）</label>
+        <input id="mmTextFiles" type="file" multiple />
+        <div class="btns">
+          <button onclick="uploadMMText()">文本入库</button>
+        </div>
+
+        <label>知识库提问</label>
+        <textarea id="mmQuestion">请总结文档中的关键信息，并给出可执行建议。</textarea>
+        <label>临时图片（可选，用于本次问答）</label>
+        <input id="mmChatImage" type="file" />
+        <label>检索TopK</label>
+        <input id="mmTopK" type="number" value="6" min="1" max="12" />
+        <div class="btns">
+          <button onclick="askMM()">知识库问答</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>输出</h2>
+      <div id="workflowStatus" class="workflow-status">状态：等待操作</div>
+      <pre id="output">等待操作...</pre>
+    </div>
+  </div>
+
+<script>
+function show(data) {
+  const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  const state = document.getElementById("workflowStatus");
+  if (data && typeof data === "object" && (data.status || data.stage || data.next_action)) {
+    const parts = [
+      data.status ? `状态：${data.status}` : null,
+      data.stage ? `阶段：${data.stage}` : null,
+      data.next_action ? `下一步：${data.next_action}` : null,
+      Array.isArray(data.missing_fields) && data.missing_fields.length
+        ? `待补充：${data.missing_fields.join(", ")}`
+        : null
+    ].filter(Boolean);
+    state.textContent = parts.join(" ｜ ");
+  } else {
+    state.textContent = "状态：未提供结构化流程状态";
+  }
+  document.getElementById("output").textContent = text;
+}
+
+function getApplyPayload() {
+  const optional = (id) => document.getElementById(id).value.trim() || null;
+  return {
+    candidate_id: optional("candidateId"),
+    candidate_name: optional("candidateName"),
+    candidate_email: optional("candidateEmail"),
+    candidate_phone: optional("candidatePhone"),
+    company_name: document.getElementById("companyName").value,
+    job_title: document.getElementById("jobTitle").value,
+    jd_text: document.getElementById("jdText").value,
+    resume_text: document.getElementById("resumeText").value
+  };
+}
+
+function conversationStorageKey(candidateId) {
+  return `agentConversation:${candidateId}`;
+}
+
+async function ensureConversation(payload) {
+  if (!payload.candidate_id) return null;
+  const key = conversationStorageKey(payload.candidate_id);
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const res = await fetch("/api/conversations", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      candidate_id: payload.candidate_id,
+      conversation_type: "job_application",
+      company_name: payload.company_name,
+      job_title: payload.job_title
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "创建会话失败");
+  localStorage.setItem(key, data.conversation_id);
+  return data.conversation_id;
+}
+
+async function ensureKnowledgeConversation(candidateId) {
+  if (!candidateId) return null;
+  const key = `knowledgeConversation:${candidateId}`;
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const res = await fetch("/api/conversations", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({candidate_id: candidateId, conversation_type: "knowledge_chat"})
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "创建知识会话失败");
+  localStorage.setItem(key, data.conversation_id);
+  return data.conversation_id;
+}
+
+function newAgentConversation() {
+  const candidateId = document.getElementById("candidateId").value.trim();
+  if (candidateId) localStorage.removeItem(conversationStorageKey(candidateId));
+  show("已切换到新会话；下次执行 Agent 指令时创建。")
+}
+
+async function uploadFiles(url, inputId) {
+  const input = document.getElementById(inputId);
+  if (!input.files.length) {
+    show("请先选择文件");
+    return;
+  }
+  const fd = new FormData();
+  for (const file of input.files) fd.append("files", file);
+  const res = await fetch(url, { method: "POST", body: fd });
+  const data = await res.json();
+  show(data);
+}
+
+async function analyze() {
+  const payload = getApplyPayload();
+  const res = await fetch("/api/analyze", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  show(data);
+}
+
+async function oneClickApply() {
+  const payload = getApplyPayload();
+  const conversationId = await ensureConversation(payload);
+  const res = await fetch("/api/agent", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      goal: "请按求职工作流生成本地申请包和邮件草稿；不得实际投递。",
+      intent: "application_package",
+      conversation_id: conversationId,
+      ...payload
+    })
+  });
+  show(await res.json());
+}
+
+async function runAgent() {
+  const payload = getApplyPayload();
+  const goal = document.getElementById("agentGoal").value.trim();
+  if (!goal) {
+    show("请输入自然语言 Agent 指令");
+    return;
+  }
+  const conversationId = await ensureConversation(payload);
+  const res = await fetch("/api/agent", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      goal,
+      conversation_id: conversationId,
+      ...payload
+    })
+  });
+  const data = await res.json();
+  show(data);
+}
+
+async function uploadMMText() {
+  await uploadFiles("/api/mm/ingest/text", "mmTextFiles");
+}
+
+async function askMM() {
+  const fd = new FormData();
+  const candidateId = document.getElementById("candidateId").value.trim();
+  const conversationId = await ensureKnowledgeConversation(candidateId);
+  fd.append("question", document.getElementById("mmQuestion").value);
+  fd.append("top_k", document.getElementById("mmTopK").value || "6");
+  fd.append("history_json", "[]");
+  if (conversationId) {
+    fd.append("conversation_id", conversationId);
+    fd.append("candidate_id", candidateId);
+  }
+
+  const imgInput = document.getElementById("mmChatImage");
+  if (imgInput.files.length) {
+    fd.append("image", imgInput.files[0]);
+  }
+
+  const res = await fetch("/api/mm/chat", { method: "POST", body: fd });
+  show(await res.json());
+}
+</script>
+</body>
+</html>

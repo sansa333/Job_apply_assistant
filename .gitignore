@@ -1,0 +1,62 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime state and generated artifacts
+outputs/
+output/
+tmp/
+_pdf_preview/
+logs/
+temp_docs/
+data/source_corpus/
+data/request_logs/
+data/profile_docs/
+data/jd_docs/
+data/mm_docs/
+data/applications.csv
+data/job_catalog*.sqlite3
+data/*.sqlite3
+data/chroma_db/
+data/resume_chroma_db/
+data/rag_eval_chroma_db/
+data/vector_db*/
+data/models/
+models/
+data/eval_dataset/domestic_job_search_v1/
+data/eval_dataset/job_rag/model_experiments/indexes/
+data/eval_dataset/job_retrieval_v2/annotation_tasks.jsonl
+# Upstream real/anonymous resumes and generic visual benchmarks stay local.
+data/eval_dataset/resumes/real_en_resume_*.md
+data/eval_dataset/jds/real_en_jd_*.md
+data/eval_dataset/pairs/resume_jd_pairs.jsonl
+data/eval_dataset/rag_queries/retrieval_eval.jsonl
+data/eval_dataset/multimodal/
+# Compact Markdown summaries are versioned; full machine-readable run dumps are regenerated.
+data/eval_dataset/**/report.json
+data/eval_dataset/**/reports/*.json
+
+# Personal working documents and binary media
+docs/personal/
+docs/interview_pitch.md
+*.docx
+*.wav
+*.mp3
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

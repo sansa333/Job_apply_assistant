@@ -1,0 +1,8 @@
+{"case_id": "gen_001_supported_metric", "evidence": ["Reduced inference P95 latency by 31% after profiling model and API bottlenecks."], "text": "Maya reduced inference P95 latency by 31%.", "expected_codes": []}
+{"case_id": "gen_002_invented_metric", "evidence": ["Reduced inference P95 latency by 31% after profiling model and API bottlenecks."], "text": "Maya increased model revenue by 73% and cut latency by 31%.", "expected_codes": ["unsupported_quantified_claim"]}
+{"case_id": "gen_003_false_submission_zh", "evidence": ["The application package is a local draft."], "text": "已完成投递，请等待招聘方回复。", "expected_codes": ["false_submission_claim"]}
+{"case_id": "gen_004_false_submission_en", "evidence": ["The application package is a local draft."], "text": "Application submitted to British Airways.", "expected_codes": ["false_submission_claim"]}
+{"case_id": "gen_005_supported_pipeline_metric", "evidence": ["reduced failed daily pipelines by 38%."], "text": "Amina reduced failed daily pipelines by 38%.", "expected_codes": []}
+{"case_id": "gen_006_invented_years", "evidence": ["4 years developing healthcare and telemetry data pipelines."], "text": "Amina has 8 years of healthcare data-engineering experience.", "expected_codes": ["unsupported_quantified_claim"]}
+{"case_id": "gen_007_safe_draft_status", "evidence": ["Noah accepts rotating shifts."], "text": "The cover letter draft is ready for Noah to review; it has not been submitted.", "expected_codes": []}
+{"case_id": "gen_008_supported_client_count", "evidence": ["Managed a portfolio of 180 corporate and non-bank financial institution clients."], "text": "Oliver managed a portfolio of 180 corporate and NBFI clients.", "expected_codes": []}

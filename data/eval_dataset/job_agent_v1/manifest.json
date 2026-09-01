@@ -1,0 +1,25 @@
+{
+  "dataset_name": "evidence_grounded_job_agent_eval",
+  "version": "1.0.0",
+  "created_at": "2026-08-27",
+  "language_mix": [
+    "en",
+    "zh"
+  ],
+  "counts": {
+    "public_historical_job_snapshots": 8,
+    "synthetic_candidate_profiles": 6,
+    "human_match_annotations": 24,
+    "agent_trajectory_cases": 10,
+    "generation_validation_cases": 8
+  },
+  "privacy": "All candidate identities and biographies are synthetic. Company and job names come from public historical job snapshots.",
+  "label_status": "Match labels are first-pass annotations and must not be reported as gold until second annotation and adjudication are complete.",
+  "file_sha256": {
+    "job_snapshots.jsonl": "20d788d14e3305eeb008d7b479d01c94d73e071bd52a6e8506ed7f64ddd2c4e7",
+    "candidate_profiles.jsonl": "a62057fdefa9853f0155a263b5b18d848c285777a31ab532ca162456d87500ca",
+    "match_annotations.jsonl": "2d909b64b959bd96df7a8a1c96fb4a88b1c25f6364d63819d44745a22f2d1555",
+    "agent_trajectories.jsonl": "151995d13e4cf30142c2bceb0d363e3d85d3a4a5cf123c2347a81b16337be517",
+    "generation_validation.jsonl": "48644c50dbcb6e475f615737472c7ed448da38135763495ba64681e8266aa848"
+  }
+}

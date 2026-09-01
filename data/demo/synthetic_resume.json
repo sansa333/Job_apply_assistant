@@ -1,0 +1,48 @@
+{
+  "data_classification": "synthetic_demo_only",
+  "candidate_id": "synthetic_candidate",
+  "name": "示例候选人",
+  "contact": "已脱敏，仅用于本地演示",
+  "target_roles": [
+    "AI 应用开发工程师",
+    "Agent 开发工程师",
+    "大模型应用开发工程师"
+  ],
+  "education": [
+    {
+      "school": "示例大学",
+      "degree": "电子信息硕士",
+      "period": "2024.09-2027.06"
+    }
+  ],
+  "skills": [
+    "Python",
+    "FastAPI",
+    "LangChain",
+    "LangGraph",
+    "RAG",
+    "BGE-M3",
+    "Chroma",
+    "Docker"
+  ],
+  "projects": [
+    {
+      "name": "证据驱动的 AI 求职助手",
+      "period": "2026.01-2026.03",
+      "details": [
+        "使用 FastAPI、LangChain 和工具调用实现岗位搜索、JD 解析与匹配分析。",
+        "使用 BGE-M3 和 Chroma 构建可追溯的候选人及岗位证据检索。",
+        "通过离线评测跟踪检索质量，并保留生成结果与投递状态。"
+      ]
+    },
+    {
+      "name": "多模态知识库问答",
+      "period": "2025.08-2025.12",
+      "details": [
+        "完成文档解析、语义切分、混合检索和引用回溯。",
+        "为测试集构建自动化评测脚本，记录召回率和排序指标。"
+      ]
+    }
+  ],
+  "notice": "本简历中的姓名、学校、经历与指标均为虚构，不对应任何真实个人。"
+}

@@ -1,0 +1,6 @@
+Company,Title,Location,Link,Description
+星河智能科技,AI Agent 应用开发工程师,北京,https://jobs.example.invalid/1,"负责基于 Python、FastAPI 和 LangGraph 开发企业智能体应用；构建 RAG 知识库、工具调用和可观测链路；要求熟悉向量数据库、Prompt 设计和 Docker。此岗位为完全合成的演示数据。"
+云舟软件,大模型应用开发工程师,上海,https://jobs.example.invalid/2,"负责大模型应用服务、文档解析和知识库问答；使用 BGE-M3、Chroma 和重排模型优化召回；要求具备 Python 后端开发与离线评测经验。此岗位为完全合成的演示数据。"
+知行科技,Agent 平台后端工程师,杭州,https://jobs.example.invalid/3,"建设 Agent 工具注册、状态管理、权限边界和执行日志平台；使用 FastAPI、Redis 与关系型数据库；了解 Function Calling、MCP 或工作流编排者优先。此岗位为完全合成的演示数据。"
+青禾数据,AI 检索工程师,深圳,https://jobs.example.invalid/4,"负责语义切分、Embedding、混合检索与 Reranker；建立 Recall、MRR 和 NDCG 评测体系；熟悉 PyTorch、Transformer 和向量数据库。此岗位为完全合成的演示数据。"
+未来栈,AI 软件开发工程师,成都,https://jobs.example.invalid/5,"开发面向业务场景的 AI 软件和模型服务；完成接口设计、测试、容器化部署和运行监控；具备 Python、FastAPI、Docker 与大模型应用经验。此岗位为完全合成的演示数据。"
