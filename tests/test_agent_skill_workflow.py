@@ -154,6 +154,7 @@ class AgentSkillWorkflowTests(unittest.TestCase):
         with (
             patch("app.agent.job_agent.create_skill_session", return_value=session),
             patch("app.agent.job_agent.get_llm", return_value=object()),
+            patch("app.services.application_service.get_llm", return_value=object()),
             patch("langchain.agents.create_agent", return_value=_CapturingAgent(), create=True),
             patch.object(settings, "agent_context_window_tokens", 4096),
             patch.object(settings, "agent_context_target_ratio", 0.6),
