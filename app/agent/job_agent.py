@@ -5,7 +5,10 @@ from typing import Any
 
 from app.agent.context_manager import ContextManager, RollingSummaryManager, estimate_tokens
 from app.agent.conversation_store import ConversationStore
-from app.agent.intent_router import INTENT_CONFIDENCE_THRESHOLD, IntentRecognition, recognize_intent
+from app.agent.intent_router import (
+    INTENT_CONFIDENCE_THRESHOLD, IntentRecognition, recognize_intent, has_new_job_reference, rule_candidates,
+)
+from app.agent.routing_policy import admission_response, allowed_tool_names, scope_tools
 from app.agent.skill_runtime import (
     SkillSession,
     auto_activate_for_request,
@@ -15,7 +18,7 @@ from app.agent.skill_runtime import (
 from app.agent.tools import build_job_tools
 from app.agent.tool_results import ToolResultManager, wrap_tools_for_context
 from app.config import settings
-from app.llm import get_llm
+from app.llm import get_llm, message_to_text
 from app.schemas import AgentRequest, ApplicationIntent
 from app.services.application_service import ApplicationService
 
@@ -191,6 +194,8 @@ def run_job_agent(
     conversation: dict[str, Any] | None = None
     recent_turns: list[dict[str, Any]] = []
     rolling_summary: dict[str, Any] = {}
+    original_req = req
+    pending_state: dict[str, Any] = {}
     context_manager = ContextManager()
     summary_manager = RollingSummaryManager()
     if req.conversation_id:
@@ -199,6 +204,7 @@ def run_job_agent(
             req,
             recent_turns=settings.agent_recent_turns,
         )
+        pending_state = store.get_routing_state(req.conversation_id, req.candidate_id)
         rolling_summary, _ = summary_manager.maybe_roll(
             store,
             req.conversation_id,
@@ -219,17 +225,54 @@ def run_job_agent(
     intent_context_tokens = estimate_tokens(json.dumps(intent_summary, ensure_ascii=False)) + sum(
         estimate_tokens(str(turn.get("content", ""))) + 4 for turn in intent_turns
     )
-    recognition = recognize_intent(
+    # Never feed an inherited target as an explicit current-turn constraint when
+    # the user announces a switch. Bound conversations require a new conversation.
+    target_change = has_new_job_reference(req.goal) or any(
+        getattr(original_req, field) and conversation and
+        getattr(original_req, field) != conversation[field]
+        for field in ("company_name", "job_title")
+    )
+    if target_change:
+        req = req.model_copy(update={"company_name": original_req.company_name,
+                                     "job_title": original_req.job_title})
+    cancelled = req.goal.strip().rstrip("。！!") in {"取消", "取消任务", "先别生成了", "先不做了", "停止"}
+    # A field-only reply resumes the confirmed pending intent. Arbitrary prose
+    # still goes through classification; ordinal answers are handled by the router.
+    if (pending_state.get("intent") and original_req.intent is None
+            and not rule_candidates(req.goal) and not target_change
+            and any(getattr(original_req, field) for field in
+                    ("company_name", "job_title", "candidate_id", "resume_text", "jd_text"))
+            and req.goal.strip() in {"", "继续", "已补充", "补充资料", "好了"}):
+        req = req.model_copy(update={"intent": ApplicationIntent(pending_state["intent"])})
+    recognition = IntentRecognition(source="cancelled") if cancelled else recognize_intent(
         req,
         recent_turns=intent_turns,
         last_intent=conversation.get("last_intent") if conversation else None,
         rolling_summary=intent_summary,
+        pending_state=pending_state,
     )
+    conflicting_fields = [
+        field for field in ("company_name", "job_title")
+        if recognition.source == "llm" and recognition.confidence >= INTENT_CONFIDENCE_THRESHOLD
+        and getattr(original_req, field) and getattr(recognition, field)
+        and getattr(original_req, field) != getattr(recognition, field)
+    ]
+    # Current-text entities override inherited values, but explicit request fields
+    # win. The classifier validates its extractions against the current user text.
+    if recognition.confidence >= INTENT_CONFIDENCE_THRESHOLD and recognition.source == "llm":
+        req = req.model_copy(update={field: getattr(original_req, field) or getattr(recognition, field)
+                                    for field in ("company_name", "job_title")})
     req = _apply_recognized_intent(req, recognition)
+    field_sources = {
+        field: ("request" if getattr(original_req, field) else
+                "current_text" if recognition.source == "llm" and getattr(req, field) and
+                getattr(req, field).casefold() in req.goal.casefold() else "conversation")
+        for field in ("company_name", "job_title") if getattr(req, field)
+    }
     context_usage: dict[str, Any] = {
         "budget_status": "not_applicable",
-        "model_invoked": recognition.source == "llm",
-        "intent_model_invoked": recognition.source == "llm",
+        "model_invoked": recognition.source == "llm" or recognition.model_attempts > 0,
+        "intent_model_invoked": recognition.source == "llm" or recognition.model_attempts > 0,
         "agent_model_invoked": False,
         "intent_context_estimated_tokens": intent_context_tokens,
         "intent_context_budget_tokens": settings.agent_intent_context_tokens,
@@ -241,9 +284,21 @@ def run_job_agent(
         completed["job_id"] = completed.get("job_id") or req.job_id
         completed["context_usage"] = dict(context_usage)
         completed["conversation_summary"] = dict(rolling_summary)
+        completed["field_sources"] = field_sources
+        completed["routing_diagnostics"] = {
+            "model_attempts": recognition.model_attempts, "error_kind": recognition.error_kind,
+            "latency_ms": round(recognition.latency_ms, 2),
+        }
         if store is not None and req.conversation_id and req.candidate_id:
-            intent_value = recognition.intent.value if recognition.intent else None
-            store.update_state(req, completed, intent=intent_value)
+            waiting = completed.get("status") in {"needs_clarification", "needs_job_identity", "needs_candidate_evidence"}
+            accepted = req.intent is not None and completed.get("status") not in {"needs_clarification", "needs_new_conversation", "cancelled"}
+            intent_value = req.intent.value if accepted else None
+            if completed.get("status") != "needs_new_conversation":
+                store.update_state(req, completed, intent=intent_value)
+            store.save_routing_state(req.conversation_id, req.candidate_id, {
+                "intent": intent_value, "intent_options": completed.get("intent_options", []),
+                "missing_fields": completed.get("missing_fields", []),
+            } if waiting else {})
             store.append_turn(
                 req.conversation_id,
                 req.candidate_id,
@@ -261,10 +316,28 @@ def run_job_agent(
             completed["context_usage"]["rolling_summary_updated"] = summary_updated
         return completed
 
+    if cancelled:
+        return finish({"result": "已取消当前待处理任务。", "status": "cancelled", "stage": "cancelled",
+                       "next_action": None})
+    if conflicting_fields:
+        question = "本轮文字中的目标与公司/岗位输入框不一致，请把输入框改为你确认的目标后继续。"
+        return finish({"result": question, "clarification_question": question,
+                       "status": "needs_job_identity", "stage": "awaiting_input",
+                       "missing_fields": conflicting_fields, "next_action": "confirm_job_identity"})
+    if conversation and conversation.get("job_id") and (target_change or any(
+        getattr(req, field) and getattr(req, field) != conversation[field]
+        for field in ("company_name", "job_title")
+    )):
+        return finish({"result": "本会话已绑定原岗位。请为新岗位建立会话，避免混用旧岗位证据。",
+                       "status": "needs_new_conversation", "stage": "blocked",
+                       "next_action": "create_conversation_for_new_job"})
+    if response := admission_response(req, recognition):
+        return finish(response)
+
     session = create_skill_session()
     auto_activate_for_request(session, req)
     service = ApplicationService()
-    raw_tools = [*build_skill_runtime_tools(session), *build_job_tools(service, session)]
+    raw_tools = scope_tools([*build_skill_runtime_tools(session), *build_job_tools(service, session)], req)
     tool_result_manager = ToolResultManager(
         store=store,
         conversation_id=req.conversation_id,
@@ -281,7 +354,7 @@ def run_job_agent(
         return finish(deterministic)
 
     tools = wrap_tools_for_context(
-        raw_tools,
+        [tool for tool in raw_tools if tool.name in allowed_tool_names(req.intent)],
         tool_result_manager,
     )
 
@@ -295,7 +368,7 @@ def run_job_agent(
     context_usage = {
         **agent_context.usage,
         "model_invoked": True,
-        "intent_model_invoked": recognition.source == "llm",
+        "intent_model_invoked": recognition.source == "llm" or recognition.model_attempts > 0,
         "agent_model_invoked": True,
         "intent_context_estimated_tokens": intent_context_tokens,
         "intent_context_budget_tokens": settings.agent_intent_context_tokens,
@@ -303,13 +376,16 @@ def run_job_agent(
     model = get_llm(temperature=0.1)
     prompt = agent_context.system_prompt
 
+    agent_invoked = False
     try:
         from langchain.agents import create_agent
 
         agent = create_agent(model=model, tools=tools, system_prompt=prompt)
-        result = agent.invoke({"messages": agent_context.messages})
+        agent_invoked = True
+        # Bound the v1 graph so repeated tool calls cannot run indefinitely.
+        result = agent.invoke({"messages": agent_context.messages}, config={"recursion_limit": 32})
         messages = result.get("messages", [])
-        content = getattr(messages[-1], "content", str(messages[-1])) if messages else str(result)
+        content = message_to_text(messages[-1].content) if messages else str(result)
         if payload := _latest_structured_tool_result(messages):
             response = _agent_response(payload, session)
             response["result"] = str(content)
@@ -330,55 +406,29 @@ def run_job_agent(
             "validation_findings": [],
             "workflow_trace": {},
         })
-    except Exception as new_api_exc:
-        try:
-            from langchain.agents import AgentType, initialize_agent
-
-            agent = initialize_agent(
-                tools=tools,
-                llm=model,
-                agent=AgentType.OPENAI_FUNCTIONS,
-                verbose=False,
-                handle_parsing_errors=True,
-                agent_kwargs={"system_message": prompt},
-            )
-            legacy_goal = "\n\n".join(
-                f"{message['role']}: {message['content']}"
-                for message in agent_context.messages
-            )
+    except Exception as agent_exc:
+        if agent_invoked:
+            # A tool may already have run. Never replay the whole request using
+            # another agent after a runtime failure.
             return finish({
-                "result": str(agent.run(legacy_goal)),
-                "status": "completed",
-                "stage": "responded",
-                "active_skills": session.active_names,
-                "evidence_level": "missing",
-                "contact_status": "pending_confirmation",
-                "missing_fields": [],
-                "next_action": None,
-                "artifacts": {},
-                "match_score": None,
-                "score_breakdown": {},
-                "evidence_matrix": [],
-                "validation_findings": [],
-                "workflow_trace": {},
+                "result": "Agent 执行中断，部分工具可能已执行。请先核对已有结果，再决定是否重试。",
+                "status": "agent_execution_error", "stage": "blocked",
+                "next_action": "review_existing_results_before_retry",
+                "artifacts": {"error_kind": type(agent_exc).__name__},
             })
-        except Exception as old_api_exc:
-            return finish({
-                "result": "Agent 工具运行初始化失败，未执行未受约束的求职操作。",
-                "status": "agent_runtime_error",
-                "stage": "agent_initialization",
-                "active_skills": session.active_names,
-                "evidence_level": "missing",
-                "contact_status": "pending_confirmation",
-                "missing_fields": [],
-                "next_action": "retry_or_check_agent_runtime",
-                "artifacts": {
-                    "new_agent_error": type(new_api_exc).__name__,
-                    "legacy_agent_error": type(old_api_exc).__name__,
-                },
-                "match_score": None,
-                "score_breakdown": {},
-                "evidence_matrix": [],
-                "validation_findings": [],
-                "workflow_trace": {},
-            })
+        return finish({
+            "result": "Agent 工具运行初始化失败，未执行未受约束的求职操作。",
+            "status": "agent_runtime_error",
+            "stage": "agent_initialization",
+            "active_skills": session.active_names,
+            "evidence_level": "missing",
+            "contact_status": "pending_confirmation",
+            "missing_fields": [],
+            "next_action": "retry_or_check_agent_runtime",
+            "artifacts": {"error_kind": type(agent_exc).__name__},
+            "match_score": None,
+            "score_breakdown": {},
+            "evidence_matrix": [],
+            "validation_findings": [],
+            "workflow_trace": {},
+        })

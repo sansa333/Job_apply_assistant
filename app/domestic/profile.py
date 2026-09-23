@@ -8,9 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from pypdf import PdfReader
-
 from app.knowledge.profiles import CandidateProfileStore
+from app.services.pdf_resume import extract_resume_pdf
 from app.utils.file_io import validate_identifier
 
 
@@ -123,19 +122,12 @@ class PdfProfileResult:
     text_length: int
     chunks_added: int
     profile: dict
+    extraction_report: dict
 
 
 def extract_pdf_text(path: Path) -> tuple[str, int]:
-    reader = PdfReader(str(path))
-    pages: list[str] = []
-    for page in reader.pages:
-        pages.append((page.extract_text() or "").strip())
-    text = "\n\n".join(value for value in pages if value).strip()
-    if len(text) < 100:
-        raise ValueError(
-            "PDF contains too little extractable text. A scanned resume requires OCR/vision processing."
-        )
-    return text, len(reader.pages)
+    result = extract_resume_pdf(path)
+    return result.text, len(result.pages)
 
 
 def derive_candidate_profile(
@@ -212,7 +204,8 @@ def ingest_pdf_profile(
     candidate_id = validate_identifier(candidate_id, field_name="candidate_id")
     if source_pdf.suffix.lower() != ".pdf":
         raise ValueError("Only PDF resumes are accepted by this endpoint")
-    resume_text, page_count = extract_pdf_text(source_pdf)
+    extraction = extract_resume_pdf(source_pdf)
+    resume_text, page_count = extraction.text, len(extraction.pages)
     target_dir = source_corpus_dir / "candidate_profiles" / candidate_id
     target_dir.mkdir(parents=True, exist_ok=True)
     managed_pdf = target_dir / "resume_source.pdf"
@@ -220,6 +213,9 @@ def ingest_pdf_profile(
         shutil.copy2(source_pdf, managed_pdf)
     extracted_path = target_dir / "resume_extracted.txt"
     extracted_path.write_text(resume_text, encoding="utf-8")
+    (target_dir / "extraction_report.json").write_text(
+        json.dumps(extraction.report(), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     profile = derive_candidate_profile(
         candidate_id,
         resume_text,
@@ -228,6 +224,11 @@ def ingest_pdf_profile(
         target_roles=target_roles,
         target_cities=target_cities,
     )
+    profile["pdf_extraction"] = {
+        "page_count": page_count,
+        "ocr_pages": extraction.report()["ocr_pages"],
+        "warnings": [f"第 {p['page_number']} 页：{w}" for p in extraction.pages for w in p["warnings"]],
+    }
     profile_path = target_dir / "profile.json"
     profile_path.write_text(
         json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -238,7 +239,7 @@ def ingest_pdf_profile(
         collection_name=collection_name,
     )
     try:
-        chunks = store.ingest_text(candidate_id, resume_text, "resume_extracted.txt")
+        chunks = store.ingest_text(candidate_id, resume_text, "resume_extracted.txt", pages=extraction.pages)
     finally:
         store.close()
     return PdfProfileResult(
@@ -250,6 +251,7 @@ def ingest_pdf_profile(
         text_length=len(resume_text),
         chunks_added=chunks,
         profile=profile,
+        extraction_report=extraction.report(),
     )
 
 

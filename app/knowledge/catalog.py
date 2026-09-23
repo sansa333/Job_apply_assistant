@@ -313,7 +313,7 @@ class JobCatalog:
         graduation_year: int | None = None,
         status: str = "open",
         domestic_only: bool = True,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> list[JobRecord]:
         clauses: list[str] = []
@@ -346,7 +346,9 @@ class JobCatalog:
             clauses.append("(graduation_year IS NULL OR graduation_year = ?)")
             params.append(graduation_year)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.extend([max(1, min(limit, 200)), max(0, offset)])
+        # Internal callers may request all filtered candidates to rank before
+        # pagination. HTTP callers remain bounded by the route's Query limits.
+        params.extend([-1 if limit is None else max(1, min(limit, 200)), max(0, offset)])
         with self._connect() as connection:
             rows = connection.execute(
                 f"""

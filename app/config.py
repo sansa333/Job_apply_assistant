@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     api_token: str | None = None
     cors_origins: str = "http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:8501,http://localhost:8501"
     max_request_bytes: int = 10 * 1024 * 1024
+    pdf_ocr_enabled: bool = True
+    pdf_ocr_dpi: int = 200
+    pdf_ocr_max_pixels: int = 12_000_000
+    pdf_resume_max_pages: int = 20
 
     # Zhipu AI (GLM) OpenAI-compatible settings
     zai_api_key: str | None = None
@@ -39,14 +43,14 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_vision_model: str = "gpt-4o-mini"
 
-    # Production job retrieval should use a prepared multilingual embedding model.
+    # Small Chinese baseline; quality-first M3 deployment is configured explicitly.
     # Set EMBEDDING_BACKEND=hash only for offline/demo fallback.
     embedding_backend: str = "huggingface"
     hf_embedding_model: str = "BAAI/bge-small-zh-v1.5"
     bge_m3_model_path: Path | None = None
     embedding_device: str = "auto"
     embedding_use_fp16: bool = False
-    embedding_max_length: int = 1024
+    embedding_max_length: int = 512
     embedding_batch_size: int = 4
     embedding_normalize: bool = True
     embedding_local_files_only: bool = False
@@ -88,6 +92,10 @@ class Settings(BaseSettings):
     agent_context_output_reserve_tokens: int = 1200
     agent_context_tool_reserve_tokens: int = 2000
     agent_intent_context_tokens: int = 1500
+    # Classifier: at most two transport attempts, no nested SDK retries.
+    agent_intent_timeout_seconds: float = 8.0
+    agent_intent_retry_delay_seconds: float = 0.2
+    agent_intent_json_mode: bool = False
     agent_summary_trigger_messages: int = 10
     agent_summary_keep_recent_messages: int = 6
     agent_summary_max_items: int = 8
@@ -116,6 +124,7 @@ class Settings(BaseSettings):
     domestic_sync_enabled: bool = False
     domestic_sync_interval_minutes: int = 360
     domestic_sync_build_index: bool = True
+    domestic_evidence_policy_path: Path | None = None
 
     @property
     def llm_api_key(self) -> str:

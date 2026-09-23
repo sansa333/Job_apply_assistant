@@ -14,6 +14,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 DEFAULT_MAX_TOKENS = 650
 DEFAULT_OVERLAP_TOKENS = 80
 JD_MIN_STANDALONE_TOKENS = 80
+JD_CHUNK_SCHEMA_VERSION = "jd-v3-no-empty-headings"
 
 
 class ChunkCandidate(TypedDict, total=False):
@@ -51,6 +52,14 @@ IMAGE_SECTIONS: dict[str, tuple[str, ...]] = {
     "image_keywords": ("检索关键词", "关键词"),
     "image_notes": ("解析备注", "备注", "错误信息"),
 }
+
+
+def is_heading_only_job_chunk(text: str) -> bool:
+    """Reject labels without facts; retain short facts such as 学历：本科."""
+    labels = {label.lower() for values in JD_SECTIONS.values() for label in values}
+    labels.update({"岗位介绍", "岗位亮点", "岗位概览"})
+    lines = [re.sub(r"[\s#【】\[\]：:]", "", line).lower() for line in text.splitlines() if line.strip()]
+    return not lines or all(line in labels for line in lines)
 
 TECH_TERMS = (
     "Python",
@@ -104,7 +113,8 @@ def split_documents_semantic(
         except Exception:
             chunks.extend(_fallback_recursive_split(doc, doc_type=doc_type))
 
-    return chunks
+    return [chunk for chunk in chunks if chunk.metadata.get("doc_type") != "job_description"
+            or not is_heading_only_job_chunk(chunk.page_content)]
 
 
 def detect_document_type(doc: Document, *, collection_name: str | None = None) -> str:
@@ -255,6 +265,16 @@ def _jd_candidates(doc: Document) -> list[ChunkCandidate]:
                     },
                 },
             )
+        elif not is_heading_only_job_chunk(overview):
+            # A short trailing fact (e.g. 学历：本科) must not disappear merely
+            # because it is too short to stand alone as an overview chunk.
+            if candidates:
+                candidates[-1]["text"] += "\n岗位概览:\n" + overview
+            else:
+                candidates.append({"text": overview, "metadata": {
+                    "section": "job_overview", "section_title": "岗位概览",
+                    "chunk_strategy": "jd_structural",
+                }})
 
     tech_chunk = _jd_tech_keywords_candidate(doc.page_content)
     if tech_chunk:

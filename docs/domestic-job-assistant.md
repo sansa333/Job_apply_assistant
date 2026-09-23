@@ -50,8 +50,11 @@ DOMESTIC_SYNC_BUILD_INDEX=true
 
 1. `POST /api/domestic/sources/refresh` 一次完成全部来源同步和国内生产索引重建。
 2. `GET /api/domestic/jobs/search` 筛选和排序岗位。
-3. `POST /api/domestic/jobs/{job_id}/fit` 使用 PDF 原文和智谱模型分析匹配度。
-4. `PUT /api/domestic/jobs/{job_id}/application` 保存投递阶段。
+3. `GET /api/domestic/jobs/{job_id}/evidence?query=技术要求&k=5` 在精确国内岗位内检索证据。
+4. `POST /api/domestic/jobs/{job_id}/fit` 检索岗位证据，并结合 PDF 原文、JD 全文和智谱模型分析匹配度；返回证据片段及来源 ID。
+5. `PUT /api/domestic/jobs/{job_id}/application` 保存投递阶段。
+6. `POST /api/domestic/jobs/{job_id}/package?candidate_id=...` 生成求职信、面试准备和邮件草稿；联系方式待确认，不自动投递，也不改写 PDF。
+7. `GET /api/domestic/jobs/{job_id}/artifacts?candidate_id=...` 查询历史，追加 `/{artifact_id}` 回读完整结果。匹配分析也保存历史。
 
 前端“**一键更新岗位**”调用上述刷新接口。`/sources/sync` 和 `/index/rebuild` 仍作为维护接口保留，但正常使用时不需要分别点击。
 
@@ -70,3 +73,15 @@ DOMESTIC_SYNC_BUILD_INDEX=true
 ```
 
 会生成 `data/eval_dataset/domestic_job_search_v1`：官网岗位、检索查询与相关性银标、候选人-岗位匹配银标和评测报告。银标可做持续回归测试，但不能替代人工金标；投递前必须打开企业官网复核岗位是否仍然有效。
+
+上述 v1 是历史规则排序回归脚本，并未完整复现搜索入口。当前完整链路评测使用
+`python -m tools.evaluate_domestic_retrieval --output outputs/domestic_eval_new`，
+覆盖真实搜索方法、精确岗位证据检索以及 BGE-small-zh / BGE-M3 独立索引对比。
+搜索已改为先对全部过滤后的候选排序，再分页；自然语言输入中的技术词在 SQL
+过滤前提取，不进行隐式城市/学历等硬条件推断。
+详细协议见 [国内检索评测说明](domestic-retrieval-evaluation.md)。
+
+正式修复后为 1,162 个切块与 494 个具体岗位有答案 test 实例，主结果 MRR@3 为
+small 0.9116 / M3 0.9349。该结果为主题 silver 回归评测，正文正例敏感性结果与长候选池退化也必须一起阅读。
+生产索引若与模型或切块版本不兼容，将拒绝服务并提示离线重建；不可把旧英文或旧切块索引继续当成国内新版本。
+定时全量重建目前仍需维护窗口，尚未实现并发查询下的无停机索引切换。

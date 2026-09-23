@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from openai import APIError, APITimeoutError
 
 from app.agent.conversation_store import (
     ConversationNotFoundError,
@@ -32,7 +33,9 @@ from app.schemas import (
     OneClickApplyResponse,
     ToolResultDetail,
 )
-from app.security import ApiBoundaryMiddleware
+from app.security import ApiBoundaryMiddleware, validate_deployment_security
+from app.knowledge.ingestion import StaleJobIndexError
+from app.readiness import domestic_readiness
 from app.services.application_service import ApplicationService, get_application_service
 from app.services.document_service import ingest_jd_files, ingest_profile_files
 
@@ -41,6 +44,7 @@ ensure_dirs()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    validate_deployment_security()
     start_domestic_scheduler()
     try:
         yield
@@ -55,6 +59,22 @@ app = FastAPI(
 )
 
 app.add_middleware(ApiBoundaryMiddleware)
+
+
+@app.exception_handler(StaleJobIndexError)
+async def stale_index_handler(_, exc: StaleJobIndexError):
+    return JSONResponse(status_code=503, content={"status": "index_rebuild_required", "detail": str(exc)})
+
+
+@app.exception_handler(APIError)
+async def provider_error_handler(_, exc: APIError):
+    timed_out = isinstance(exc, APITimeoutError)
+    return JSONResponse(status_code=504 if timed_out else 503, content={
+        "status": "model_timeout" if timed_out else "model_unavailable",
+        "detail": "模型服务暂时未能完成请求，请稍后重试；本次未自动投递。",
+    })
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -101,21 +121,10 @@ def health() -> dict:
 
 @app.get("/ready")
 def ready() -> JSONResponse:
-    checks = {
-        "data_dir": settings.data_dir.exists(),
-        "outputs_dir": settings.outputs_dir.exists(),
-        "job_catalog": settings.job_catalog_path.exists(),
-        "llm_credentials": bool(
-            settings.zai_api_key
-            or settings.zhipu_api_key
-            or settings.zhipuai_api_key
-            or settings.openai_api_key
-        ),
-    }
-    ready_status = all(checks.values())
+    report = domestic_readiness()
     return JSONResponse(
-        status_code=200 if ready_status else 503,
-        content={"status": "ready" if ready_status else "not_ready", "checks": checks},
+        status_code=200 if report["status"] == "ready" else 503,
+        content=report,
     )
 
 

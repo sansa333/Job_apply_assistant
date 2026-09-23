@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import random
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
+from openai import APIConnectionError, APITimeoutError, APIStatusError
 
+from app.config import settings
 from app.llm import get_llm, message_to_text
 from app.schemas import AgentRequest, ApplicationIntent
 
@@ -24,6 +28,9 @@ class IntentRecognition(BaseModel):
     job_title: str = ""
     missing_fields: list[str] = Field(default_factory=list)
     summary: str = ""
+    model_attempts: int = 0
+    error_kind: str | None = None
+    latency_ms: float = 0.0
 
 
 _INTENT_PROMPT = """
@@ -64,7 +71,41 @@ _RULE_PATTERNS: tuple[tuple[ApplicationIntent, tuple[str, ...]], ...] = (
 )
 
 _NEGATION_PREFIXES = ("不要", "不需要", "不用", "别", "无需", "取消")
-_CONTINUATION_MARKERS = ("刚才", "上面", "之前", "继续", "再", "那个", "语气", "改成", "更正式", "更简洁")
+_CONTINUATION = re.compile(
+    r"^(?:请|帮我)?(?:继续|继续刚才的|继续上面的|语气再正式一点|"
+    r"再正式一点|更正式一点|更简洁一点|再简洁一点|简短一点|再改一下)[。！!\s]*$"
+)
+
+
+def has_new_job_reference(goal: str) -> bool:
+    """Conservatively avoid copying identity across an explicit target change."""
+    return bool(re.search(r"换|另一|改为|改成|看看.+(?:公司|岗位)|(?:公司|岗位)[:：]", goal))
+
+
+def rule_candidates(goal: str) -> list[ApplicationIntent]:
+    result = []
+    for intent, keywords in _RULE_PATTERNS:
+        if any(
+            not _is_negated(goal.casefold(), match.start())
+            for keyword in keywords
+            for match in re.finditer(re.escape(keyword.casefold()), goal.casefold())
+        ):
+            result.append(intent)
+    return result
+
+
+def task_only_expression(req: AgentRequest) -> bool:
+    """Only bypass entity extraction for a narrow, fully understood task phrase."""
+    remaining = req.goal.casefold()
+    for value in (req.company_name, req.job_title):
+        if value:
+            remaining = remaining.replace(value.casefold(), "")
+    words = [keyword for _, keywords in _RULE_PATTERNS for keyword in keywords]
+    words += ["岗位匹配度", "帮我", "请", "分析", "生成", "准备", "写", "一下", "一份", "一个", "只", "先",
+              "不要", "不需要", "不用", "别", "无需", "的", "这个", "该", "给我", "一些", "岗位"]
+    for word in sorted(words, key=len, reverse=True):
+        remaining = remaining.replace(word.casefold(), "")
+    return not remaining.strip(" ，,。.!！?？：:；;\n\t")
 
 
 def _is_negated(goal: str, position: int) -> bool:
@@ -76,11 +117,14 @@ def _matched_rule_intent(goal: str) -> ApplicationIntent | None:
     """Return only an unambiguous, non-negated keyword match."""
     matches: list[tuple[ApplicationIntent, int]] = []
     for intent, keywords in _RULE_PATTERNS:
-        positions = [goal.find(keyword.casefold()) for keyword in keywords]
+        positions = [m.start() for keyword in keywords for m in re.finditer(re.escape(keyword.casefold()), goal)]
         valid = [position for position in positions if position >= 0 and not _is_negated(goal, position)]
         if valid:
             matches.append((intent, min(valid)))
     if not matches:
+        return None
+
+    if len({intent for intent, _ in matches}) > 1 and any(word in goal for word in ("或者", "还是", "或是")):
         return None
 
     only_position = goal.rfind("只")
@@ -121,6 +165,8 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 
 def _rule_fallback(req: AgentRequest, *, reason: str = "") -> IntentRecognition:
     goal = req.goal.casefold()
+    if (req.company_name or req.job_title) and not task_only_expression(req):
+        return IntentRecognition(source="unresolved", summary="无法确认本轮是否切换目标岗位，请明确任务和目标。")
     if intent := _matched_rule_intent(goal):
         return IntentRecognition(
             intent=intent,
@@ -145,6 +191,7 @@ def recognize_intent(
     recent_turns: list[dict[str, Any]] | None = None,
     last_intent: str | None = None,
     rolling_summary: dict[str, Any] | None = None,
+    pending_state: dict[str, Any] | None = None,
 ) -> IntentRecognition:
     """Classify a natural-language goal and extract only explicit job identity fields."""
     if req.intent is not None:
@@ -157,8 +204,28 @@ def recognize_intent(
             summary="调用方已明确声明意图。",
         )
 
+    pending = pending_state or {}
+    answer = req.goal.strip().rstrip("。！!")
+    options = pending.get("intent_options", [])
+    ordinals = {"第一个": 0, "第1个": 0, "1": 0, "第二个": 1, "第2个": 1, "2": 1,
+                "第三个": 2, "第3个": 2, "3": 2, "第四个": 3, "第4个": 3, "4": 3,
+                "第五个": 4, "第5个": 4, "5": 4, "第六个": 5, "第6个": 5, "6": 5}
+    index = ordinals.get(answer)
+    if index is not None and index < len(options):
+        return IntentRecognition(intent=ApplicationIntent(options[index]), confidence=1.0,
+                                 source="confirmed", company_name=req.company_name, job_title=req.job_title)
+    # Labels are echoed in the clarification question and must be actionable
+    # even when the model is unavailable.
+    labels = {"分析岗位匹配度": "fit_analysis", "生成完整申请材料": "application_package",
+              "撰写求职信": "cover_letter", "撰写投递邮件": "application_email",
+              "准备面试": "interview_prep", "获取一般求职建议": "general_advice"}
+    if answer in labels and labels[answer] in options:
+        return IntentRecognition(intent=ApplicationIntent(labels[answer]), confidence=1.0,
+                                 source="confirmed", company_name=req.company_name, job_title=req.job_title)
+
     rule_intent = _matched_rule_intent(req.goal.casefold())
-    if rule_intent is not None and not _missing_job_fields(req, rule_intent):
+    if (rule_intent is not None and not _missing_job_fields(req, rule_intent)
+            and not has_new_job_reference(req.goal) and task_only_expression(req)):
         return IntentRecognition(
             intent=rule_intent,
             confidence=0.95,
@@ -169,8 +236,8 @@ def recognize_intent(
         )
 
     if (
-        last_intent
-        and any(marker in req.goal.casefold() for marker in _CONTINUATION_MARKERS)
+        last_intent and not pending and not rule_candidates(req.goal)
+        and _CONTINUATION.fullmatch(req.goal.strip())
     ):
         try:
             continued_intent = ApplicationIntent(last_intent)
@@ -197,20 +264,65 @@ def recognize_intent(
         ],
         "last_intent": last_intent,
         "rolling_summary": rolling_summary or {},
+        "pending_clarification": pending,
     }
+    started = time.monotonic()
+    attempts = 0
+    error_kind = None
+    # Limit the entire classification to two calls, including format repair.
+    messages = [SystemMessage(content=_INTENT_PROMPT),
+                HumanMessage(content=json.dumps(request_payload, ensure_ascii=False))]
     try:
         model = get_llm(temperature=0.0)
-        result = model.invoke(
-            [
-                SystemMessage(content=_INTENT_PROMPT),
-                HumanMessage(content=json.dumps(request_payload, ensure_ascii=False)),
-            ]
-        )
-        payload = _extract_json_object(message_to_text(getattr(result, "content", result)))
-        recognition = IntentRecognition.model_validate(payload)
-        recognition.source = "llm"
-        recognition.company_name = recognition.company_name.strip() or req.company_name
-        recognition.job_title = recognition.job_title.strip() or req.job_title
-        return recognition
+        # Copy configuration, never mutate a shared model. Test doubles may only expose invoke.
+        if isinstance(model, BaseModel):
+            model = model.model_copy(update={"request_timeout": settings.agent_intent_timeout_seconds,
+                                             "max_retries": 0, "max_tokens": 400})
+        if settings.agent_intent_json_mode:
+            model = model.bind(response_format={"type": "json_object"})
+        for attempt in range(2):
+            attempts += 1
+            try:
+                result = model.invoke(messages)
+                payload = _extract_json_object(message_to_text(getattr(result, "content", result)))
+                recognition = IntentRecognition.model_validate(payload)
+                # Model-extracted identities must be explicit in the current user text.
+                for field in ("company_name", "job_title"):
+                    value = getattr(recognition, field).strip()
+                    existing = getattr(req, field)
+                    if value and value != existing and value.casefold() not in req.goal.casefold():
+                        return IntentRecognition(error_kind="ungrounded_identity", source="unresolved",
+                                                 model_attempts=attempts,
+                                                 latency_ms=(time.monotonic() - started) * 1000)
+                    setattr(recognition, field, value or existing)
+                recognition.source = "llm"
+                recognition.model_attempts = attempts
+                recognition.error_kind = error_kind
+                recognition.latency_ms = (time.monotonic() - started) * 1000
+                if recognition.intent:
+                    effective = req.model_copy(update={"company_name": recognition.company_name,
+                                                       "job_title": recognition.job_title})
+                    recognition.missing_fields = _missing_job_fields(effective, recognition.intent)
+                return recognition
+            except (ValueError, TypeError):
+                error_kind = "invalid_output"
+                if attempt == 0:
+                    messages.append(HumanMessage(content="上次输出结构不合法。请重新分类，只返回符合字段定义的 JSON。"))
+                    continue
+                break
+            except Exception as exc:
+                transient = isinstance(exc, (APIConnectionError, APITimeoutError, TimeoutError)) or (
+                    isinstance(exc, APIStatusError) and (exc.status_code in {408, 429} or exc.status_code >= 500)
+                )
+                error_kind = "transient_error" if transient else "provider_error"
+                if transient and attempt == 0:
+                    time.sleep(max(0, settings.agent_intent_retry_delay_seconds) * random.uniform(0.5, 1.0))
+                    continue
+                break
     except Exception as exc:
-        return _rule_fallback(req, reason=type(exc).__name__)
+        error_kind = type(exc).__name__
+    fallback = _rule_fallback(req, reason=error_kind or "unavailable")
+    fallback.model_attempts = attempts
+    fallback.error_kind = error_kind
+    fallback.latency_ms = (time.monotonic() - started) * 1000
+    return fallback

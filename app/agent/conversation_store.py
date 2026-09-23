@@ -102,6 +102,13 @@ class ConversationStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_tool_results_conversation
                 ON agent_tool_results(conversation_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS agent_routing_state (
+                  conversation_id TEXT PRIMARY KEY,
+                  state_json TEXT NOT NULL,
+                  FOREIGN KEY(conversation_id) REFERENCES agent_conversations(conversation_id)
+                    ON DELETE CASCADE
+                );
                 """
             )
 
@@ -443,6 +450,24 @@ class ConversationStore:
         )
         return effective, conversation, turns
 
+    def get_routing_state(self, conversation_id: str, candidate_id: str) -> dict:
+        self.get(conversation_id, candidate_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT state_json FROM agent_routing_state WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        return json.loads(row["state_json"]) if row else {}
+
+    def save_routing_state(self, conversation_id: str, candidate_id: str, state: dict) -> None:
+        self.get(conversation_id, candidate_id)
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO agent_routing_state VALUES (?, ?) "
+                "ON CONFLICT(conversation_id) DO UPDATE SET state_json = excluded.state_json",
+                (conversation_id, json.dumps(state, ensure_ascii=False)),
+            )
+
     def update_state(
         self,
         request: AgentRequest,
@@ -469,7 +494,7 @@ class ConversationStore:
                     resolved_job_id,
                     request.company_name or conversation["company_name"],
                     request.job_title or conversation["job_title"],
-                    intent or conversation["last_intent"],
+                    None if response.get("status") == "cancelled" else intent or conversation["last_intent"],
                     response.get("stage") or conversation["current_stage"],
                     now,
                     request.conversation_id,
@@ -490,4 +515,5 @@ class ConversationStore:
             candidate_id,
             limit=50,
         )
+        conversation["routing_state"] = self.get_routing_state(conversation_id, candidate_id)
         return conversation

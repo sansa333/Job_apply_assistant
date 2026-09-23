@@ -91,6 +91,8 @@
     <div class="card">
       <h1>多模态智能助手演示</h1>
       <p>技术栈: FastAPI + LangChain + Chroma + GLM(智谱AI OpenAI Compatible) + RAG + Agent</p>
+      <label>访问令牌（部署启用鉴权时填写，仅保留在当前页面）</label>
+      <input id="apiToken" type="password" autocomplete="off" />
     </div>
 
     <div class="grid-2">
@@ -171,6 +173,13 @@ function show(data) {
   document.getElementById("output").textContent = text;
 }
 
+function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const token = document.getElementById("apiToken").value.trim();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(url, {...options, headers, redirect: "error"});
+}
+
 function getApplyPayload() {
   const optional = (id) => document.getElementById(id).value.trim() || null;
   return {
@@ -194,7 +203,7 @@ async function ensureConversation(payload) {
   const key = conversationStorageKey(payload.candidate_id);
   const existing = localStorage.getItem(key);
   if (existing) return existing;
-  const res = await fetch("/api/conversations", {
+  const res = await apiFetch("/api/conversations", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
@@ -215,7 +224,7 @@ async function ensureKnowledgeConversation(candidateId) {
   const key = `knowledgeConversation:${candidateId}`;
   const existing = localStorage.getItem(key);
   if (existing) return existing;
-  const res = await fetch("/api/conversations", {
+  const res = await apiFetch("/api/conversations", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({candidate_id: candidateId, conversation_type: "knowledge_chat"})
@@ -240,14 +249,14 @@ async function uploadFiles(url, inputId) {
   }
   const fd = new FormData();
   for (const file of input.files) fd.append("files", file);
-  const res = await fetch(url, { method: "POST", body: fd });
+  const res = await apiFetch(url, { method: "POST", body: fd });
   const data = await res.json();
   show(data);
 }
 
 async function analyze() {
   const payload = getApplyPayload();
-  const res = await fetch("/api/analyze", {
+  const res = await apiFetch("/api/analyze", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload)
@@ -259,7 +268,7 @@ async function analyze() {
 async function oneClickApply() {
   const payload = getApplyPayload();
   const conversationId = await ensureConversation(payload);
-  const res = await fetch("/api/agent", {
+  const res = await apiFetch("/api/agent", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
@@ -280,7 +289,7 @@ async function runAgent() {
     return;
   }
   const conversationId = await ensureConversation(payload);
-  const res = await fetch("/api/agent", {
+  const res = await apiFetch("/api/agent", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
@@ -314,7 +323,7 @@ async function askMM() {
     fd.append("image", imgInput.files[0]);
   }
 
-  const res = await fetch("/api/mm/chat", { method: "POST", body: fd });
+  const res = await apiFetch("/api/mm/chat", { method: "POST", body: fd });
   show(await res.json());
 }
 </script>

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.docker.example
 
 # Python
 .venv/
@@ -21,6 +22,7 @@ tmp/
 _pdf_preview/
 logs/
 temp_docs/
+.codex_doc_parse*/
 data/source_corpus/
 data/request_logs/
 data/profile_docs/
@@ -51,6 +53,9 @@ data/eval_dataset/**/reports/*.json
 # Personal working documents and binary media
 docs/personal/
 docs/interview_pitch.md
+docs/interviews/jingwei_hirain_ai_algorithm_mock_interview.md
+tools/build_jingwei_interview_pdf.py
+tools/build_pdd_tailored_interview_guide.py
 *.docx
 *.wav
 *.mp3

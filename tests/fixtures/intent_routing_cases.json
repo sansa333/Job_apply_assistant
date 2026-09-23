@@ -1,0 +1,14 @@
+[
+  {"id":"declared_fit","request":{"goal":"分析","intent":"fit_analysis","company_name":"Acme","job_title":"Engineer","resume_text":"Python 项目"},"expected":"execute:fit_analysis"},
+  {"id":"missing_target","request":{"goal":"分析匹配度","intent":"fit_analysis"},"expected":"needs_job_identity"},
+  {"id":"missing_evidence","request":{"goal":"分析匹配度","intent":"fit_analysis","company_name":"Acme","job_title":"Engineer"},"expected":"needs_candidate_evidence"},
+  {"id":"rule_fit","request":{"goal":"请分析岗位匹配度","company_name":"Acme","job_title":"Engineer","resume_text":"Python"},"expected":"execute:fit_analysis"},
+  {"id":"negated_package","request":{"goal":"不要生成申请包，只准备面试题","company_name":"Acme","job_title":"Engineer","resume_text":"Python"},"expected":"execute:interview_prep"},
+  {"id":"provider_unavailable","request":{"goal":"处理一下"},"expected":"needs_clarification"},
+  {"id":"low_confidence","request":{"goal":"看看","company_name":"Acme","job_title":"Engineer","resume_text":"Python"},"model_output":{"intent":"application_package","confidence":0.4},"expected":"needs_clarification"},
+  {"id":"ambiguous_alternatives","request":{"goal":"生成申请包还是分析匹配度","company_name":"Acme","job_title":"Engineer","resume_text":"Python"},"model_output":{"intent":"application_package","confidence":0.99},"expected":"needs_clarification"},
+  {"id":"hallucinated_target","request":{"goal":"分析一下"},"model_output":{"intent":"fit_analysis","confidence":0.99,"company_name":"捏造公司"},"expected":"needs_clarification"},
+  {"id":"explicit_entities","request":{"goal":"分析腾讯后端工程师的能力","resume_text":"Python"},"model_output":{"intent":"fit_analysis","confidence":0.96,"company_name":"腾讯","job_title":"后端工程师"},"expected":"execute:fit_analysis"},
+  {"id":"format_error","request":{"goal":"帮忙处理"},"model_output":"not JSON","expected":"needs_clarification"},
+  {"id":"unknown_target_during_outage","request":{"goal":"分析腾讯后端工程师匹配度","company_name":"Acme","job_title":"Engineer","resume_text":"Python"},"expected":"needs_clarification"}
+]

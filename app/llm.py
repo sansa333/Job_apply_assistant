@@ -16,6 +16,8 @@ def _build_chat_model(model_name: str, temperature: float) -> ChatOpenAI:
         max_retries=settings.llm_max_retries,
         max_tokens=settings.llm_max_output_tokens,
         extra_body=extra_body,
+        # GLM and the configured compatible endpoints use Chat Completions.
+        use_responses_api=False,
     )
 
 

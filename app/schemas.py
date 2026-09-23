@@ -134,6 +134,10 @@ class AgentResponse(BaseModel):
     extracted_entities: dict[str, str] = Field(default_factory=dict)
     context_usage: dict = Field(default_factory=dict)
     conversation_summary: dict = Field(default_factory=dict)
+    clarification_question: str | None = None
+    intent_options: list[ApplicationIntent] = Field(default_factory=list)
+    field_sources: dict[str, str] = Field(default_factory=dict)
+    routing_diagnostics: dict = Field(default_factory=dict)
 
 
 class ConversationCreateRequest(BaseModel):
@@ -170,6 +174,7 @@ class ConversationDetail(ConversationSummary):
     turns: list[ConversationTurn] = Field(default_factory=list)
     rolling_summary: dict = Field(default_factory=dict)
     tool_results: list[dict] = Field(default_factory=list)
+    routing_state: dict = Field(default_factory=dict)
 
 
 class ToolResultDetail(BaseModel):

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Literal
+from pypdf.errors import PdfReadError
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.domestic.artifacts import list_artifacts, read_artifact, save_artifact
 from app.domestic.profile import (
     ingest_pdf_profile,
     load_candidate_profile,
@@ -57,20 +62,29 @@ async def upload_pdf_resume(
         raise HTTPException(status_code=422, detail="Only PDF resumes are supported")
     target_dir = settings.source_corpus_dir / "candidate_profiles" / candidate_id
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / "resume_source.pdf"
-    target.write_bytes(await file.read())
+    content = await file.read(settings.max_request_bytes + 1)
+    if len(content) > settings.max_request_bytes:
+        raise HTTPException(status_code=413, detail="PDF exceeds upload size limit")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=422, detail="Invalid PDF signature")
     try:
-        result = ingest_pdf_profile(
-            candidate_id=candidate_id,
-            source_pdf=target,
-            source_corpus_dir=settings.source_corpus_dir,
-            vector_db_dir=settings.vector_db_dir,
-            collection_name=settings.candidate_collection_name,
-            graduation_year=graduation_year,
-            target_roles=_split_preferences(target_roles) if target_roles.strip() else None,
-            target_cities=_split_preferences(target_cities) if target_cities.strip() else None,
-        )
-    except ValueError as exc:
+        # Parse before replacing the managed original; a corrupt upload must
+        # not destroy the candidate's previously valid resume.
+        with TemporaryDirectory(prefix="upload-", dir=target_dir) as staging:
+            target = Path(staging) / "resume.pdf"
+            target.write_bytes(content)
+            result = await run_in_threadpool(
+                ingest_pdf_profile,
+                candidate_id=candidate_id,
+                source_pdf=target,
+                source_corpus_dir=settings.source_corpus_dir,
+                vector_db_dir=settings.vector_db_dir,
+                collection_name=settings.candidate_collection_name,
+                graduation_year=graduation_year,
+                target_roles=_split_preferences(target_roles) if target_roles.strip() else None,
+                target_cities=_split_preferences(target_cities) if target_cities.strip() else None,
+            )
+    except (ValueError, PdfReadError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "candidate_id": candidate_id,
@@ -80,6 +94,7 @@ async def upload_pdf_resume(
         "text_length": result.text_length,
         "chunks_added": result.chunks_added,
         "profile": profile_safe_summary(result.profile),
+        "extraction": result.extraction_report,
         "resume_content_policy": "read_only_no_rewrite",
     }
 
@@ -167,6 +182,9 @@ def search_domestic_jobs(
     candidate_id: str = "current_candidate",
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    strategy: Literal["rules", "bm25", "dense", "hybrid"] = "rules",
+    individual_only: bool = False,
+    strict_graduation: bool = False,
 ) -> dict:
     return DomesticJobService().search(
         keyword=keyword,
@@ -178,6 +196,9 @@ def search_domestic_jobs(
         candidate_id=candidate_id,
         limit=limit,
         offset=offset,
+        strategy=strategy,
+        individual_only=individual_only,
+        strict_graduation=strict_graduation,
     )
 
 
@@ -192,7 +213,48 @@ def get_domestic_job(job_id: str) -> dict:
 @router.post("/jobs/{job_id}/fit")
 def analyze_domestic_job(job_id: str, candidate_id: str = "current_candidate") -> dict:
     try:
-        return DomesticJobService().analyze_job(job_id=job_id, candidate_id=candidate_id)
+        result = DomesticJobService().analyze_job(job_id=job_id, candidate_id=candidate_id)
+        return save_artifact(candidate_id, job_id, {**result, "kind": "fit_analysis"})
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/jobs/{job_id}/evidence")
+def retrieve_domestic_evidence(job_id: str, query: str = Query(min_length=1), k: int = Query(default=5, ge=1, le=50)) -> dict:
+    try:
+        return DomesticJobService().retrieve_job_evidence(job_id=job_id, query=query, k=k)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/jobs/{job_id}/package")
+def generate_domestic_package(job_id: str, candidate_id: str = "current_candidate") -> dict:
+    try:
+        return DomesticJobService().generate_application_package(job_id=job_id, candidate_id=candidate_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/jobs/{job_id}/evidence/check")
+def check_domestic_evidence(job_id: str, query: str = Query(min_length=1)) -> dict:
+    try:
+        return DomesticJobService().check_job_evidence(job_id=job_id, query=query)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/jobs/{job_id}/artifacts")
+def domestic_artifacts(job_id: str, candidate_id: str = "current_candidate") -> dict:
+    try:
+        return {"artifacts": list_artifacts(candidate_id, job_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/jobs/{job_id}/artifacts/{artifact_id}")
+def domestic_artifact(job_id: str, artifact_id: str, candidate_id: str = "current_candidate") -> dict:
+    try:
+        return read_artifact(candidate_id, job_id, artifact_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

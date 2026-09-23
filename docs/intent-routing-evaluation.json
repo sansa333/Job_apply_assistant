@@ -1,0 +1,107 @@
+{
+  "evaluation_kind": "offline_policy_regression_with_stubbed_model",
+  "real_model_accuracy": null,
+  "confidence_calibrated": false,
+  "case_count": 12,
+  "passed": 12,
+  "unsafe_admissions": 0,
+  "unnecessary_blocks": 0,
+  "cases": [
+    {
+      "id": "declared_fit",
+      "expected": "execute:fit_analysis",
+      "actual": "execute:fit_analysis",
+      "passed": true,
+      "source": "declared",
+      "model_attempts": 0
+    },
+    {
+      "id": "missing_target",
+      "expected": "needs_job_identity",
+      "actual": "needs_job_identity",
+      "passed": true,
+      "source": "declared",
+      "model_attempts": 0
+    },
+    {
+      "id": "missing_evidence",
+      "expected": "needs_candidate_evidence",
+      "actual": "needs_candidate_evidence",
+      "passed": true,
+      "source": "declared",
+      "model_attempts": 0
+    },
+    {
+      "id": "rule_fit",
+      "expected": "execute:fit_analysis",
+      "actual": "execute:fit_analysis",
+      "passed": true,
+      "source": "rule",
+      "model_attempts": 0
+    },
+    {
+      "id": "negated_package",
+      "expected": "execute:interview_prep",
+      "actual": "execute:interview_prep",
+      "passed": true,
+      "source": "rule",
+      "model_attempts": 0
+    },
+    {
+      "id": "provider_unavailable",
+      "expected": "needs_clarification",
+      "actual": "needs_clarification",
+      "passed": true,
+      "source": "unresolved",
+      "model_attempts": 1
+    },
+    {
+      "id": "low_confidence",
+      "expected": "needs_clarification",
+      "actual": "needs_clarification",
+      "passed": true,
+      "source": "llm",
+      "model_attempts": 1
+    },
+    {
+      "id": "ambiguous_alternatives",
+      "expected": "needs_clarification",
+      "actual": "needs_clarification",
+      "passed": true,
+      "source": "llm",
+      "model_attempts": 1
+    },
+    {
+      "id": "hallucinated_target",
+      "expected": "needs_clarification",
+      "actual": "needs_clarification",
+      "passed": true,
+      "source": "unresolved",
+      "model_attempts": 1
+    },
+    {
+      "id": "explicit_entities",
+      "expected": "execute:fit_analysis",
+      "actual": "execute:fit_analysis",
+      "passed": true,
+      "source": "llm",
+      "model_attempts": 1
+    },
+    {
+      "id": "format_error",
+      "expected": "needs_clarification",
+      "actual": "needs_clarification",
+      "passed": true,
+      "source": "unresolved",
+      "model_attempts": 2
+    },
+    {
+      "id": "unknown_target_during_outage",
+      "expected": "needs_clarification",
+      "actual": "needs_clarification",
+      "passed": true,
+      "source": "unresolved",
+      "model_attempts": 1
+    }
+  ]
+}

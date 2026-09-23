@@ -7,8 +7,8 @@ from datetime import date
 from typing import Any
 from urllib.parse import quote
 
-import requests
 import streamlit as st
+from app.ui_http import backend_request
 
 st.set_page_config(page_title="AI Job Apply Assistant", page_icon="🧠", layout="wide")
 
@@ -17,7 +17,7 @@ DEFAULT_BACKEND = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 def post_files(url: str, files: list[Any]) -> dict:
     payload = [("files", (f.name, f.getvalue(), f.type or "application/octet-stream")) for f in files]
-    response = requests.post(url, files=payload, timeout=120)
+    response = backend_request("POST", url, files=payload, timeout=120)
     if not response.ok:
         detail = None
         try:
@@ -34,7 +34,7 @@ def render_json(data: Any) -> None:
 
 
 def request_json(method: str, url: str, **kwargs: Any) -> dict:
-    response = requests.request(method, url, timeout=kwargs.pop("timeout", 120), **kwargs)
+    response = backend_request(method, url, timeout=kwargs.pop("timeout", 120), **kwargs)
     if not response.ok:
         detail = None
         try:
@@ -60,7 +60,7 @@ with st.sidebar:
 
     if health_check:
         try:
-            res = requests.get(f"{backend_url}/health", timeout=30)
+            res = backend_request("GET", f"{backend_url}/health", timeout=30)
             res.raise_for_status()
             st.success("连接成功")
             render_json(res.json())
@@ -191,6 +191,7 @@ with domestic_tab:
     with st.expander("只读导入 PDF 简历", expanded=False):
         st.warning("系统只复制并解析 PDF 原文，不会改写或覆盖简历内容。")
         st.caption(f"当前 candidate_id：{active_candidate_id}")
+        st.caption("支持文字版、扫描版及混合 PDF；识别质量不足的页面会自动在本地执行 OCR。")
         resume_pdf = st.file_uploader("PDF 简历", type=["pdf"], key="domestic_resume_pdf")
         if st.button("导入 PDF", use_container_width=True):
             if resume_pdf is None:
@@ -210,6 +211,15 @@ with domestic_tab:
                         timeout=600,
                     )
                     st.success("简历已按只读策略导入")
+                    extraction = (data.get("profile") or {}).get("pdf_extraction", {})
+                    if extraction.get("ocr_pages"):
+                        st.info("已使用 OCR 识别页面：" + ", ".join(map(str, extraction["ocr_pages"])))
+                    for warning in extraction.get("warnings", []):
+                        st.warning(warning)
+                    with st.expander("核对逐页识别文字"):
+                        for page in data.get("extraction", {}).get("pages", []):
+                            st.caption(f"第 {page['page_number']} 页 · {page['method']}")
+                            st.text(page["text"] or "（空白页）")
                     render_json(data)
                 except Exception as exc:
                     st.error(f"PDF 导入失败: {exc}")
@@ -217,10 +227,10 @@ with domestic_tab:
     st.markdown("#### 搜索与筛选")
     filter_a, filter_b, filter_c, filter_d = st.columns(4)
     domestic_keyword = filter_a.text_input(
-        "岗位关键词",
+        "岗位需求",
         value=" ".join(target_roles),
         key="domestic_keyword",
-        help="多个关键词用空格分隔，匹配任意一个。",
+        help="可以描述技能和工作方向；公司、城市和招聘类型请用旁边的筛选条件。",
     )
     domestic_company = filter_b.text_input("公司", key="domestic_company")
     domestic_location = filter_c.text_input(
@@ -229,6 +239,10 @@ with domestic_tab:
     domestic_type = filter_d.selectbox(
         "招聘类型", ["", "campus", "internship", "social"], key="domestic_type"
     )
+    domestic_search_mode = st.selectbox("搜索方式", ["关键词相关度", "语义检索", "融合检索", "原有规则"], key="domestic_search_mode")
+    domestic_individual_only = st.checkbox("仅显示具体岗位，排除汇总招聘公告", value=True)
+    domestic_strict_year = st.checkbox("仅显示明确符合毕业年份的岗位", value=False,
+        help="启用后不展示未说明毕业年份的岗位，可能减少结果。")
     if st.button("搜索岗位", type="primary", use_container_width=True):
         try:
             data = request_json(
@@ -241,6 +255,9 @@ with domestic_tab:
                     "graduation_year": graduation_year,
                     "candidate_id": active_candidate_id,
                     "limit": 100,
+                    "strategy": {"关键词相关度": "bm25", "语义检索": "dense", "融合检索": "hybrid", "原有规则": "rules"}[domestic_search_mode],
+                    "individual_only": domestic_individual_only,
+                    "strict_graduation": domestic_strict_year,
                 },
             )
             st.session_state.domestic_matches = data.get("matches", [])
@@ -249,10 +266,12 @@ with domestic_tab:
 
     matches = st.session_state.get("domestic_matches", [])
     if matches:
+        st.caption("结果按所选搜索方式排序；规则参考分不是录用概率，请核对完整 JD 中的条件。")
         st.dataframe(
             [
                 {
-                    "匹配分": row.get("relevance_score"),
+                    "检索顺序": row.get("discovery_rank"),
+                    "规则参考分": row.get("relevance_score"),
                     "公司": row.get("company_name"),
                     "岗位": row.get("job_title"),
                     "地点": row.get("location"),
@@ -287,6 +306,34 @@ with domestic_tab:
             except Exception as exc:
                 st.error(f"分析失败: {exc}")
         stage_a, stage_b = st.columns([1, 2])
+        if st.button("生成岗位申请材料草稿", use_container_width=True):
+            try:
+                st.session_state.domestic_package = request_json(
+                    "POST", f"{backend_url}/api/domestic/jobs/{selected['job_id']}/package",
+                    params={"candidate_id": active_candidate_id}, timeout=600,
+                )
+            except Exception as exc:
+                st.error(f"生成失败: {exc}")
+        package = st.session_state.get("domestic_package")
+        if package and package.get("job_id") == selected["job_id"] and package.get("candidate_id") == active_candidate_id:
+            st.caption(package["notice"])
+            for field, label in (("cover_letter", "求职信"), ("interview_questions", "面试准备"), ("application_email", "邮件草稿")):
+                with st.expander(label):
+                    st.write(package[field])
+                    st.download_button(f"下载{label}", package[field], file_name=f"{field}.md")
+        with st.expander("查看历史分析和申请材料"):
+            try:
+                history = request_json("GET", f"{backend_url}/api/domestic/jobs/{selected['job_id']}/artifacts",
+                                       params={"candidate_id": active_candidate_id})["artifacts"]
+                if history:
+                    selected_artifact = st.selectbox("历史记录", history, format_func=lambda row: f"{row['created_at']} {row['kind']}")
+                    if st.button("读取历史记录"):
+                        render_json(request_json("GET", f"{backend_url}/api/domestic/jobs/{selected['job_id']}/artifacts/{selected_artifact['artifact_id']}",
+                                                 params={"candidate_id": active_candidate_id}))
+                else:
+                    st.caption("暂无历史记录。")
+            except Exception as exc:
+                st.error(f"历史记录读取失败: {exc}")
         selected_stage = stage_a.selectbox(
             "投递阶段",
             ["saved", "planned", "applied", "written_test", "interview", "offer", "rejected", "withdrawn", "ignored"],
@@ -311,7 +358,7 @@ with domestic_tab:
             st.markdown("#### 岗位详情")
             st.write(detail.get("description", ""))
         fit_result = st.session_state.get("domestic_fit")
-        if fit_result:
+        if fit_result and fit_result.get("job_id") == selected["job_id"] and fit_result.get("candidate_id") == active_candidate_id:
             st.markdown("#### 简历匹配分析")
             st.write(fit_result.get("fit_report") or fit_result.get("result") or fit_result)
     else:
@@ -363,7 +410,7 @@ with job_tab:
                 files = None
                 if upload_file is not None:
                     files = {"file": (upload_file.name, upload_file.getvalue(), upload_file.type or "text/plain")}
-                response = requests.post(f"{backend_url}/api/jobs/upload", data=form_data, files=files, timeout=180)
+                response = backend_request("POST", f"{backend_url}/api/jobs/upload", data=form_data, files=files, timeout=180)
                 response.raise_for_status()
                 st.success("目标 JD 已入库")
                 render_json(response.json())
@@ -382,7 +429,7 @@ with job_tab:
                 files = None
                 if profile_file is not None:
                     files = {"file": (profile_file.name, profile_file.getvalue(), profile_file.type or "text/plain")}
-                response = requests.post(f"{backend_url}/api/candidates/upload", data=form_data, files=files, timeout=180)
+                response = backend_request("POST", f"{backend_url}/api/candidates/upload", data=form_data, files=files, timeout=180)
                 response.raise_for_status()
                 st.success("候选人资料已入库")
                 render_json(response.json())
@@ -651,7 +698,7 @@ with chat_tab:
                     )
                 }
 
-            res = requests.post(
+            res = backend_request("POST",
                 f"{backend_url}/api/mm/chat",
                 data=form_data,
                 files=files,

@@ -29,7 +29,7 @@ class CandidateProfileStore:
             persist_directory=str(self.persist_dir),
         )
 
-    def ingest_text(self, candidate_id: str, text: str, filename: str = "profile.md") -> int:
+    def ingest_text(self, candidate_id: str, text: str, filename: str = "profile.md", *, pages: list[dict] | None = None) -> int:
         candidate_id = validate_identifier(candidate_id, field_name="candidate_id")
         if not text.strip():
             raise ValueError("profile content is required")
@@ -48,7 +48,18 @@ class CandidateProfileStore:
                 "doc_type": "resume",
             },
         )
-        chunks = split_documents_semantic([document], collection_name="profile") or [document]
+        documents = [document] if pages is None else [
+            Document(page_content=page["text"], metadata={
+                **document.metadata, "page_number": page["page_number"],
+                "extraction_method": page["method"],
+            }) for page in pages if page["text"].strip()
+        ]
+        chunks = []
+        for source_document in documents:
+            page_chunks = split_documents_semantic([source_document], collection_name="profile") or [source_document]
+            for chunk in page_chunks:
+                chunk.metadata.update(source_document.metadata)
+            chunks.extend(page_chunks)
         ids: list[str] = []
         for index, chunk in enumerate(chunks):
             chunk.metadata.update(document.metadata)
