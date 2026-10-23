@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 
 from app.agent.job_agent import run_job_agent
+from app.config import Settings
 from app.llm import get_llm
 from app.schemas import AgentRequest
 
@@ -108,7 +109,13 @@ def test_repeated_tool_calls_stop_at_graph_limit():
 
 
 def test_glm_chat_completions_tool_round_trip_without_network():
-    model = get_llm()
+    offline_settings = Settings(
+        _env_file=None,
+        zai_api_key="offline-test",
+        zhipu_base_url="https://offline.invalid/v4/",
+    )
+    with patch("app.llm.settings", offline_settings):
+        model = get_llm()
     assert model.use_responses_api is False
     response = {
         "id": "offline", "model": "glm-test", "object": "chat.completion",

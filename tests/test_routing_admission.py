@@ -75,12 +75,36 @@ class RoutingAdmissionTests(unittest.TestCase):
         self.assertEqual(run_job_agent(first, conversation_store=self.store)["status"], "needs_job_identity")
         service = Mock()
         service.analyze_scoped_fit.return_value = {"status": "ok", "stage": "analyzed"}
-        with patch("app.agent.job_agent.ApplicationService", return_value=service):
+        with (patch("app.agent.job_agent.ApplicationService", return_value=service),
+              patch("app.agent.intent_router.get_llm", side_effect=AssertionError("field reply must not call a model")) as classifier):
             result = run_job_agent(AgentRequest(goal="已补充", candidate_id="bob",
                 conversation_id=conv["conversation_id"], company_name="Acme", job_title="Engineer"),
                 conversation_store=self.store)
         self.assertEqual(result["recognized_intent"], "fit_analysis")
         service.analyze_scoped_fit.assert_called_once()
+        classifier.assert_not_called()
+
+    def test_partial_job_identity_reply_resumes_after_store_reopen(self):
+        for existing, supplied in (({"company_name": "Acme"}, {"job_title": "Engineer"}),
+                                   ({"job_title": "Engineer"}, {"company_name": "Acme"})):
+            with self.subTest(existing=existing):
+                conv = self.store.create(ConversationCreateRequest(candidate_id="bob", **existing))
+                first = AgentRequest(goal="分析匹配度", intent="fit_analysis", candidate_id="bob",
+                                     conversation_id=conv["conversation_id"])
+                self.assertEqual(run_job_agent(first, conversation_store=self.store)["status"], "needs_job_identity")
+                service = Mock()
+                service.analyze_scoped_fit.return_value = {"status": "ok", "stage": "analyzed"}
+                reopened = ConversationStore(self.store.path)
+                with (patch("app.agent.job_agent.ApplicationService", return_value=service),
+                      patch("app.agent.intent_router.get_llm") as classifier):
+                    result = run_job_agent(AgentRequest(goal="已补充", candidate_id="bob",
+                        conversation_id=conv["conversation_id"], **supplied), conversation_store=reopened)
+                self.assertEqual(result["recognized_intent"], "fit_analysis")
+                received = service.analyze_scoped_fit.call_args.args[0]
+                self.assertEqual((received.company_name, received.job_title), ("Acme", "Engineer"))
+                classifier.assert_not_called()
+                service.one_click_apply.assert_not_called()
+                self.assertEqual(reopened.get_routing_state(conv["conversation_id"], "bob"), {})
 
     def test_cancel_clears_pending_and_previous_intent(self):
         self.store.update_state(self.request("分析"), {}, intent="fit_analysis")

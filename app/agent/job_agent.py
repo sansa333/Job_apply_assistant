@@ -227,8 +227,9 @@ def run_job_agent(
     )
     # Never feed an inherited target as an explicit current-turn constraint when
     # the user announces a switch. Bound conversations require a new conversation.
+    # Filling an empty identity field continues the pending task.
     target_change = has_new_job_reference(req.goal) or any(
-        getattr(original_req, field) and conversation and
+        getattr(original_req, field) and conversation and conversation.get(field) and
         getattr(original_req, field) != conversation[field]
         for field in ("company_name", "job_title")
     )
